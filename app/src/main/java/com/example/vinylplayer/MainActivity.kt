@@ -39,12 +39,15 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -52,6 +55,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -69,6 +73,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -80,6 +85,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -228,6 +234,7 @@ fun PlayerApp() {
     val tracks = remember { mutableStateListOf<Track>() }
     var currentId by remember { mutableStateOf<String?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
+    var pendingPlay by remember { mutableStateOf(false) }
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var showNow by remember { mutableStateOf(false) }
@@ -267,6 +274,7 @@ fun PlayerApp() {
     }
     val bg by animateColorAsState(tint, tween(900), label = "bg")
     val brush = Brush.verticalGradient(listOf(bg, BaseDark))
+    val labelColor = lerp(bg, Color.White, 0.35f)
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
@@ -295,11 +303,30 @@ fun PlayerApp() {
         }
     }
 
+    // Музыка стартует, когда пластинка достана и игла опущена
+    fun releasePending() {
+        if (pendingPlay) {
+            pendingPlay = false
+            player.play()
+        }
+    }
+
     fun playIndex(i: Int) {
+        pendingPlay = true
+        player.pause()
         player.seekTo(i, 0L)
-        player.play()
         currentId = tracks[i].uri.toString()
         showNow = true
+    }
+
+    fun skip(next: Boolean) {
+        if (tracks.size > 1) {
+            pendingPlay = true
+            player.pause()
+            if (next) player.seekToNextMediaItem() else player.seekToPreviousMediaItem()
+        } else {
+            player.seekTo(0L)
+        }
     }
 
     fun removeTrack(t: Track) {
@@ -311,9 +338,17 @@ fun PlayerApp() {
         }
     }
 
-    fun toggle() { if (player.isPlaying) player.pause() else player.play() }
+    fun toggle() {
+        pendingPlay = false
+        if (player.isPlaying) player.pause() else player.play()
+    }
 
-    BackHandler(enabled = showNow && picker == null) { showNow = false }
+    fun closeNow() {
+        showNow = false
+        releasePending()
+    }
+
+    BackHandler(enabled = showNow && picker == null) { closeNow() }
 
     val pickerTrack = picker
     if (pickerTrack != null) {
@@ -356,7 +391,7 @@ fun PlayerApp() {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 120.dp)
+                        contentPadding = PaddingValues(bottom = 120.dp)
                     ) {
                         items(tracks, key = { it.uri.toString() }) { t ->
                             val isCur = t.uri.toString() == currentId
@@ -373,7 +408,7 @@ fun PlayerApp() {
                             ) {
                                 CoverImage(
                                     coverFile(ctx, t), coverVersion,
-                                    Modifier.size(54.dp).clip(RoundedCornerShape(12.dp))
+                                    Modifier.size(54.dp).clip(RoundedCornerShape(10.dp))
                                 )
                                 Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f)) {
@@ -404,8 +439,10 @@ fun PlayerApp() {
                 exit = slideOutVertically(tween(250)) { it } + fadeOut()
             ) {
                 current?.let {
-                    MiniPlayer(it, coverFile(ctx, it), coverVersion, isPlaying,
-                        onOpen = { showNow = true }, onToggle = { toggle() })
+                    MiniPlayer(
+                        it, coverFile(ctx, it), coverVersion, isPlaying, labelColor,
+                        onOpen = { showNow = true }, onToggle = { toggle() }
+                    )
                 }
             }
 
@@ -414,17 +451,19 @@ fun PlayerApp() {
                 enter = slideInVertically(tween(450)) { it } + fadeIn(),
                 exit = slideOutVertically(tween(350)) { it } + fadeOut()
             ) {
-                current?.let {
+                current?.let { cur ->
                     NowPlaying(
-                        track = it, file = coverFile(ctx, it), version = coverVersion,
-                        isPlaying = isPlaying, position = position, duration = duration,
-                        background = brush,
-                        onClose = { showNow = false },
-                        onFindCover = { picker = it },
+                        track = cur, file = coverFile(ctx, cur), version = coverVersion,
+                        isPlaying = isPlaying, waiting = pendingPlay,
+                        position = position, duration = duration,
+                        background = brush, labelColor = labelColor,
+                        onClose = { closeNow() },
+                        onFindCover = { releasePending(); picker = cur },
                         onPlayPause = { toggle() },
-                        onNext = { player.seekToNextMediaItem() },
-                        onPrev = { player.seekToPreviousMediaItem() },
-                        onSeek = { ms -> player.seekTo(ms) }
+                        onNext = { skip(true) },
+                        onPrev = { skip(false) },
+                        onSeek = { ms -> player.seekTo(ms) },
+                        onPulled = { releasePending() }
                     )
                 }
             }
@@ -440,7 +479,7 @@ fun EmptyState(onAdd: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Vinyl(null, 0, spin, 200.dp)
+        Vinyl(Color(0xFF6B4FA0), { spin.value }, 200.dp, labelText = "SIDE A")
         Spacer(Modifier.height(28.dp))
         Text("Здесь пока пусто", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
@@ -489,29 +528,43 @@ fun CoverImage(file: File?, version: Int, modifier: Modifier = Modifier) {
     }
 }
 
+// Пластинка: чёрный винил с канавками и цветной этикеткой
 @Composable
 fun Vinyl(
-    coverFile: File?, version: Int,
-    spin: Animatable<Float, AnimationVector1D>,
-    diameter: Dp, modifier: Modifier = Modifier
+    labelColor: Color,
+    angle: () -> Float,
+    diameter: Dp,
+    modifier: Modifier = Modifier,
+    labelText: String? = null
 ) {
     Box(modifier.size(diameter)) {
-        Box(Modifier.fillMaxSize().graphicsLayer { rotationZ = spin.value }) {
+        Box(Modifier.fillMaxSize().graphicsLayer { rotationZ = angle() }) {
             Canvas(Modifier.fillMaxSize()) {
                 val r = this.size.minDimension / 2f
                 drawCircle(Color(0xFF0E0E10))
                 for (i in 0..14) {
                     drawCircle(
                         Color.White.copy(alpha = if (i % 3 == 0) 0.08f else 0.035f),
-                        radius = r * (0.62f + i * 0.025f),
+                        radius = r * (0.42f + i * 0.036f),
                         style = Stroke(1.2f)
                     )
                 }
             }
-            CoverImage(
-                coverFile, version,
-                Modifier.size(diameter * 0.56f).align(Alignment.Center).clip(CircleShape)
-            )
+            Box(
+                Modifier.size(diameter * 0.36f).align(Alignment.Center).clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(listOf(lerp(labelColor, Color.White, 0.2f), labelColor))
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (labelText != null) {
+                    Text(
+                        labelText, color = Color.Black.copy(alpha = 0.55f),
+                        fontSize = (diameter.value * 0.045f).sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.offset(y = -(diameter * 0.07f))
+                    )
+                }
+            }
             Box(
                 Modifier.size(diameter * 0.045f).align(Alignment.Center)
                     .clip(CircleShape).background(Color(0xFF0E0E10))
@@ -535,25 +588,87 @@ fun Vinyl(
 }
 
 @Composable
-fun Tonearm(playing: Boolean) {
+fun Tonearm(down: Boolean) {
     val angle by animateFloatAsState(
-        if (playing) 22f else 0f, tween(900, easing = FastOutSlowInEasing), label = "arm"
+        if (down) 15f else 0f, tween(900, easing = FastOutSlowInEasing), label = "arm"
     )
-    Canvas(Modifier.size(300.dp, 320.dp)) {
-        val s = this.size.width / 300f
-        val pivot = Offset(285f * s, 22f * s)
-        drawCircle(Color(0xFF3A3A40), 16f * s, pivot)
+    Canvas(Modifier.fillMaxSize()) {
+        val k = this.size.width / 320f
+        val pivot = Offset(305f * k, 8f * k)
+        drawCircle(Color(0xFF3A3A40), 14f * k, pivot)
         rotate(angle, pivot) {
             drawLine(
-                Color(0xFFCFCFD6), pivot, Offset(pivot.x, pivot.y + 185f * s),
-                strokeWidth = 5f * s, cap = StrokeCap.Round
+                Color(0xFFCFCFD6), pivot, Offset(pivot.x, pivot.y + 137f * k),
+                strokeWidth = 5f * k, cap = StrokeCap.Round
             )
             drawRoundRect(
-                Accent, Offset(pivot.x - 8f * s, pivot.y + 180f * s),
-                Size(16f * s, 28f * s), CornerRadius(4f * s)
+                Accent, Offset(pivot.x - 8f * k, pivot.y + 130f * k),
+                Size(16f * k, 28f * k), CornerRadius(4f * k)
             )
         }
-        drawCircle(Color(0xFF55555C), 7f * s, pivot)
+        drawCircle(Color(0xFF55555C), 6f * k, pivot)
+    }
+}
+
+// Конверт с обложкой; пластинка выезжает из него, потом опускается игла
+@Composable
+fun SleeveStage(
+    track: Track, file: File, version: Int,
+    isPlaying: Boolean, waiting: Boolean,
+    labelColor: Color, onPulled: () -> Unit
+) {
+    BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        val s = minOf(1f, maxWidth / 320.dp)
+        val intro = remember(track) { Animatable(0f) }
+        val pull = remember(track) { Animatable(0f) }
+        val pulled by remember(track) { derivedStateOf { pull.value >= 1f } }
+
+        LaunchedEffect(track) {
+            delay(150)
+            intro.animateTo(1f, tween(380, easing = FastOutSlowInEasing))
+            pull.animateTo(1f, tween(950, easing = FastOutSlowInEasing))
+            delay(650)
+            onPulled()
+        }
+
+        val spin = rememberSpin(isPlaying && pulled, 6000)
+
+        Box(Modifier.size(320.dp * s, 250.dp * s)) {
+            // пластинка (под конвертом)
+            Vinyl(
+                labelColor,
+                { spin.value + pull.value * 160f },
+                184.dp * s,
+                Modifier.offset(3.dp * s, 33.dp * s).graphicsLayer {
+                    translationX = pull.value * (100.dp * s).toPx()
+                },
+                labelText = "SIDE A"
+            )
+            // конверт с обложкой
+            Box(
+                Modifier.offset(0.dp, 30.dp * s).size(190.dp * s)
+                    .graphicsLayer {
+                        val v = intro.value.coerceIn(0f, 1f)
+                        scaleX = 0.85f + 0.15f * v
+                        scaleY = 0.85f + 0.15f * v
+                        alpha = v
+                    }
+                    .shadow(14.dp, RoundedCornerShape(6.dp))
+                    .clip(RoundedCornerShape(6.dp))
+                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(6.dp))
+            ) {
+                CoverImage(file, version, Modifier.fillMaxSize())
+                Box(
+                    Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(16.dp * s)
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.35f))
+                            )
+                        )
+                )
+            }
+            Tonearm(pulled && (isPlaying || waiting))
+        }
     }
 }
 
@@ -635,19 +750,23 @@ fun RoundButton(onClick: () -> Unit, d: Dp, bg: Color, content: @Composable () -
 
 @Composable
 fun MiniPlayer(
-    track: Track, file: File, version: Int, isPlaying: Boolean,
+    track: Track, file: File, version: Int, isPlaying: Boolean, labelColor: Color,
     onOpen: () -> Unit, onToggle: () -> Unit
 ) {
-    val spin = rememberSpin(isPlaying, 8000)
+    val spin = rememberSpin(isPlaying, 4000)
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
             .background(Color(0xE61B1B22)).clickable(onClick = onOpen).padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(46.dp).graphicsLayer { rotationZ = spin.value }.clip(CircleShape)) {
-            CoverImage(file, version, Modifier.fillMaxSize())
+        Box(Modifier.size(68.dp, 46.dp)) {
+            Vinyl(labelColor, { spin.value }, 42.dp, Modifier.offset(24.dp, 2.dp))
+            CoverImage(
+                file, version,
+                Modifier.size(46.dp).shadow(4.dp, RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp))
+            )
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 track.title, color = Color.White, fontWeight = FontWeight.SemiBold,
@@ -665,13 +784,14 @@ fun MiniPlayer(
 
 @Composable
 fun NowPlaying(
-    track: Track, file: File, version: Int, isPlaying: Boolean,
-    position: Long, duration: Long, background: Brush,
+    track: Track, file: File, version: Int,
+    isPlaying: Boolean, waiting: Boolean,
+    position: Long, duration: Long,
+    background: Brush, labelColor: Color,
     onClose: () -> Unit, onFindCover: () -> Unit,
     onPlayPause: () -> Unit, onNext: () -> Unit, onPrev: () -> Unit,
-    onSeek: (Long) -> Unit
+    onSeek: (Long) -> Unit, onPulled: () -> Unit
 ) {
-    val spin = rememberSpin(isPlaying, 6000)
     var dragValue by remember { mutableStateOf<Float?>(null) }
     val progress = (dragValue ?: if (duration > 0) position.toFloat() / duration else 0f).coerceIn(0f, 1f)
 
@@ -694,10 +814,7 @@ fun NowPlaying(
 
         Spacer(Modifier.weight(1f))
 
-        Box(Modifier.size(300.dp, 320.dp)) {
-            Vinyl(file, version, spin, 270.dp, Modifier.align(Alignment.BottomStart))
-            Tonearm(isPlaying)
-        }
+        SleeveStage(track, file, version, isPlaying, waiting, labelColor, onPulled)
 
         Spacer(Modifier.height(28.dp))
 
