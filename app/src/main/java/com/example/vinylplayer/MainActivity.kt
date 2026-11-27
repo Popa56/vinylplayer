@@ -316,7 +316,7 @@ class FxState(private val prefs: SharedPreferences) {
         saveLevels()
     }
 
-    fun setBass(v: Int) {
+    fun updateBass(v: Int) {
         bass = v
         prefs.edit().putInt("bass", v).apply()
         push()
