@@ -1267,7 +1267,7 @@ fun EqualizerPanel(fx: FxState, onClose: () -> Unit) {
             Text("Усиление баса", color = Muted, fontSize = 13.sp)
             Slider(
                 value = fx.bass.toFloat(),
-                onValueChange = { fx.setBass(it.toInt()) },
+                onValueChange = { fx.updateBass(it.toInt()) },
                 valueRange = 0f..1000f,
                 enabled = fx.enabled,
                 colors = colors
