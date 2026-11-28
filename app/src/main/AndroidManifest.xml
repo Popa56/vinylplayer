@@ -10,7 +10,9 @@
 
     <application
         android:label="Vinyl Player"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/Theme.VinylPlayer">
 
         <activity
             android:name=".MainActivity"
@@ -32,7 +34,6 @@
             </intent-filter>
         </service>
 
-        <!-- Виджет на главный экран -->
         <receiver
             android:name=".VinylWidget"
             android:exported="true">
