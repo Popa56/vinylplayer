@@ -6,11 +6,6 @@ import androidx.compose.ui.graphics.Color
 import java.io.File
 import kotlin.math.abs
 
-/**
- * Хранилище метаданных: избранное, индивидуальный цвет винила,
- * ручная подмена обложки для альбома/трека.
- * Всё лежит в SharedPreferences "meta" + файлы override-обложек в filesDir.
- */
 object MetaStore {
 
     private const val PREFS = "meta"
@@ -19,7 +14,6 @@ object MetaStore {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     // ───────────────────────── Избранное ─────────────────────────
-    // Ключ — uri трека (переживает перезапуск и пересборку библиотеки)
 
     fun favorites(ctx: Context): MutableSet<String> =
         prefs(ctx).getStringSet("fav", emptySet())?.toMutableSet() ?: mutableSetOf()
@@ -38,21 +32,21 @@ object MetaStore {
     }
 
     // ─────────────────────── Цвет винила альбома ───────────────────────
+    // Храним как Long — обходит неоднозначность ULong.toInt()
 
     fun vinylColor(ctx: Context, albumId: String): Color? {
-        val v = prefs(ctx).getInt("vc_${albumId.hashCode()}", -1)
-        return if (v == -1) null else Color(v.toUInt())
+        val v = prefs(ctx).getLong("vc_${albumId.hashCode()}", -1L)
+        return if (v == -1L) null else Color(v.toULong())
     }
 
     fun setVinylColor(ctx: Context, albumId: String, c: Color?) {
         prefs(ctx).edit().apply {
             if (c == null) remove("vc_${albumId.hashCode()}")
-            else putInt("vc_${albumId.hashCode()}", c.value.toLong().toInt())
+            else putLong("vc_${albumId.hashCode()}", c.value.toLong())
         }.apply()
     }
 
     // ─────────────────── Ручная подмена обложки ───────────────────
-    // Своя обложка перекрывает обложку из папки и из тегов.
 
     fun coverOverride(ctx: Context, albumId: String): File? {
         val f = File(ctx.filesDir, "c_override_${albumId.hashCode()}.jpg")
@@ -70,25 +64,22 @@ object MetaStore {
     // ───────────────────────── Палитра винила ─────────────────────────
 
     val VinylPalette: List<Color> = listOf(
-        Color(0xFF6B4FA0), // фиолетовый
-        Color(0xFFB03A48), // бордовый
-        Color(0xFF2E7D6B), // изумруд
-        Color(0xFFB8862E), // золото
-        Color(0xFF3A5BA0), // синий
-        Color(0xFF7A4A2A), // коричневый
-        Color(0xFF8E4A8E), // маджента
-        Color(0xFF2B2B35)  // графит
+        Color(0xFF6B4FA0),
+        Color(0xFFB03A48),
+        Color(0xFF2E7D6B),
+        Color(0xFFB8862E),
+        Color(0xFF3A5BA0),
+        Color(0xFF7A4A2A),
+        Color(0xFF8E4A8E),
+        Color(0xFF2B2B35)
     )
 
-    /** Цвет по умолчанию, если пользователь не выбрал свой. */
     fun defaultVinylColor(albumId: String): Color =
         VinylPalette[abs(albumId.hashCode()) % VinylPalette.size]
 
-    /** Итоговый цвет пластинки для альбома. */
     fun vinylColorOr(ctx: Context, albumId: String): Color =
         vinylColor(ctx, albumId) ?: defaultVinylColor(albumId)
 }
 
-/** Итоговая обложка с учётом ручной подмены. */
 fun resolveCover(ctx: Context, albumId: String): File =
     MetaStore.coverOverride(ctx, albumId) ?: albumCoverFile(ctx, albumId)
