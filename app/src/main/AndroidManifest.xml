@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
 
     <application
+        uses-permission android:name="android.permission.VIBRATE" 
         android:label="Vinyl Player"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
