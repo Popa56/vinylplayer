@@ -47,7 +47,7 @@ object MetaStore {
     fun setVinylColor(ctx: Context, albumId: String, c: Color?) {
         prefs(ctx).edit().apply {
             if (c == null) remove("vc_${albumId.hashCode()}")
-            else putInt("vc_${albumId.hashCode()}", c.value.toInt())
+            else putInt("vc_${albumId.hashCode()}", c.value.toLong().toInt())
         }.apply()
     }
 
