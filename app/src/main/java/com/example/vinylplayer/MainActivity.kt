@@ -30,7 +30,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -56,7 +55,6 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -118,7 +116,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
@@ -805,7 +802,8 @@ fun PlayerApp() {
             }
         }
     }
-    val bg by animateColorAsState(tint, tween(900), label = "bg")
+    // Фикс 2: мгновенная смена фона без анимации (убирает 100+ перерисовок storeWall)
+    val bg = tint
 
     fun rebuildPlaylist() {
         runCatching {
@@ -1199,14 +1197,13 @@ fun PlayerApp() {
                         items(albums, key = { it.id }) { a ->
                             val isCurAlbum = a.id == current?.albumId
                             val open = expandedId == a.id
-                            val rowBg by animateColorAsState(
-                                if (isCurAlbum) Color(0x26FFFFFF) else Color.Transparent,
-                                label = "row"
-                            )
                             Column(Modifier.fillMaxWidth().animateItem()) {
                                 Row(
                                     Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
-                                        .background(rowBg)
+                                        .background(
+                                            if (isCurAlbum) Color(0x26FFFFFF)
+                                            else Color.Transparent
+                                        )
                                         .clickable { expandedId = if (open) null else a.id }
                                         .padding(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
@@ -1409,7 +1406,6 @@ val WoodDark = Color(0xFF4A3119)
 fun Modifier.storeWall(tint: Color): Modifier = this
     .background(Brush.verticalGradient(listOf(Color(0xFF1C1512), Color(0xFF0D0A08))))
     .drawBehind {
-        // дешёвые горизонтальные линии вместо кирпичей — меньше draw-call'ов
         val rowH = 36.dp.toPx()
         var y = 0f
         while (y < this.size.height) {
@@ -1603,12 +1599,13 @@ fun Vinyl(
     scratches: Int = 0
 ) {
     Box(modifier.size(diameter)) {
-        // Слой с канавками и этикеткой — рисуется один раз, вращается целиком
         Box(Modifier.fillMaxSize().graphicsLayer { rotationZ = angle() }) {
             Canvas(Modifier.fillMaxSize()) {
                 val r = this.size.minDimension / 2f
                 drawCircle(Color(0xFF0E0E10))
-                for (i in 0..14) {
+                // Фикс 4: для мелких винилов канавки через одну
+                val step = if (diameter < 60.dp) 2 else 1
+                for (i in 0..14 step step) {
                     drawCircle(
                         Color.White.copy(alpha = if (i % 3 == 0) 0.08f else 0.035f),
                         radius = r * (0.42f + i * 0.036f),
@@ -1622,7 +1619,6 @@ fun Vinyl(
                     drawCircle(Color(0xFF040405), radius = rr, style = Stroke(4f))
                     drawCircle(Color.White.copy(alpha = 0.10f), radius = rr + 3f, style = Stroke(1f))
                 }
-                // царапины
                 for (s in 0 until scratches) {
                     val seed = (s * 31).toFloat()
                     val ang = (seed * 47f) % 360f
@@ -1660,7 +1656,6 @@ fun Vinyl(
                     .clip(CircleShape).background(Color(0xFF0E0E10))
             )
         }
-        // Блик — не вращается, рисуется один раз
         Canvas(Modifier.fillMaxSize()) {
             val r = this.size.minDimension / 2f
             drawCircle(
@@ -1710,6 +1705,7 @@ fun SleeveStage(
 ) {
     val scope = rememberCoroutineScope()
     BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        // РАЗМЕР ПЛЕЕРА НЕ МЕНЯЛСЯ — 320×290 dp, как было
         val s = minOf(maxWidth / 320.dp, maxHeight / 290.dp).coerceAtLeast(0.4f)
         val aid = track.albumId
         val lift = remember(aid) { Animatable(0f) }
@@ -1757,26 +1753,9 @@ fun SleeveStage(
             label = "arm"
         )
 
-        // jitter и breath создаются только когда реально нужны
-        val jitter: Float = if (isPlaying && pulled) {
-            val t = rememberInfiniteTransition(label = "armjitter")
-            val j by t.animateFloat(
-                0f, 0.5f,
-                infiniteRepeatable(tween(120, easing = LinearEasing), RepeatMode.Reverse),
-                label = "jitter"
-            )
-            j
-        } else 0f
-
-        val breath: Float = if (pulled) {
-            val bt = rememberInfiniteTransition(label = "breath")
-            val b by bt.animateFloat(
-                1f, 1.012f,
-                infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-                label = "breathVal"
-            )
-            b
-        } else 1f
+        // Фикс 3: jitter и breath отключены (были анимации на 120 fps)
+        val jitter = 0f
+        val breath = 1f
 
         val spinning = (isPlaying || reversing) && pulled && !scratching && dragAngle == null
         val spin = rememberSpin(
@@ -1923,9 +1902,8 @@ fun SleeveStage(
                     .graphicsLayer {
                         translationY = (1f - lift.value) * (68.dp * s).toPx()
                         val sc = 0.92f + 0.08f * lift.value
-                        val bs = if (pulled) breath else 1f
-                        scaleX = sc * bs
-                        scaleY = sc * bs
+                        scaleX = sc
+                        scaleY = sc
                     }
                     .then(
                         if (manual && !pulled) {
@@ -1978,9 +1956,8 @@ fun SleeveStage(
                         )
                     }
             )
-            Tonearm(object : State<Float> {
-                override val value: Float get() = armAngle.value + jitter
-            })
+            // Фикс 3: без jitter — игла статична
+            Tonearm(armAngle)
         }
     }
 }
@@ -2074,13 +2051,9 @@ fun PlayerIcon(kind: String, color: Color, iconSize: Dp) {
 fun RoundButton(onClick: () -> Unit, d: Dp, bg: Color, content: @Composable () -> Unit) {
     val ctx = LocalContext.current
     val src = remember { MutableInteractionSource() }
-    val pressed by src.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        if (pressed) 0.88f else 1f,
-        spring(dampingRatio = 0.5f, stiffness = 400f), label = "press"
-    )
+    // Фикс 5: убрана анимация сжатия — мгновенный отклик
     Box(
-        Modifier.size(d).graphicsLayer { scaleX = scale; scaleY = scale }
+        Modifier.size(d)
             .clip(CircleShape).background(bg)
             .clickable(interactionSource = src, indication = null, onClick = {
                 Sfx.click(ctx)
@@ -2513,7 +2486,6 @@ fun Crate(
                     },
                 contentAlignment = Alignment.BottomCenter
             ) {
-                // Боковины ящика
                 Box(
                     Modifier.align(Alignment.BottomCenter).offset(x = -(side / 2 + 15.dp))
                         .width(14.dp).height(side * 0.7f)
@@ -2526,7 +2498,6 @@ fun Crate(
                         .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
                         .background(Brush.horizontalGradient(listOf(WoodDark, WoodLight)))
                 )
-                // Только 4 обложки — меньше декодирования и GPU-нагрузки
                 val hi = minOf(base + 3, last)
                 for (i in hi downTo base) {
                     val a = albums.getOrNull(i) ?: continue
@@ -2572,10 +2543,10 @@ fun CrateSleeve(
 ) {
     val r = rel()
     val shape = RoundedCornerShape(8.dp)
+    // Фикс 1: убран rotationX — только сдвиг и масштаб, без 3D-трансформации
     Box(
         Modifier.size(side)
             .graphicsLayer {
-                cameraDistance = 14f * density
                 if (r >= 0f) {
                     translationY = -r * 34.dp.toPx()
                     val sc = (1f - 0.045f * r).coerceAtLeast(0.6f)
@@ -2584,10 +2555,8 @@ fun CrateSleeve(
                     alpha = (1f - (r - 3.6f).coerceAtLeast(0f) * 1.5f).coerceIn(0f, 1f)
                 } else {
                     val f = -r
-                    transformOrigin = TransformOrigin(0.5f, 1f)
-                    rotationX = -62f * f.coerceAtMost(1f)
-                    translationY = f * side.toPx() * 0.5f
-                    val sc = 1f + 0.05f * f.coerceAtMost(1f)
+                    translationY = f * side.toPx() * 0.6f
+                    val sc = 1f + 0.06f * f.coerceAtMost(1f)
                     scaleX = sc
                     scaleY = sc
                     alpha = (1f - f).coerceIn(0f, 1f)
